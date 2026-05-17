@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#include <windows.h> //nik el windows
+#include <windows.h> 
 #include <direct.h>
+#include <shellapi.h>
 
 int main() {
     char input[100];
@@ -32,7 +33,7 @@ int main() {
             running = false;
         } 
         else if (strcmp(command, "help") == 0) {
-            printf("Built-ins: exit, cd, clear\n");
+            printf("Built-ins: exit, cd, clear, search\n");
         }
         else if (strcmp(command, "cd") == 0) {
             char *path = strtok(NULL, "");
@@ -45,7 +46,18 @@ int main() {
             }
         }
         else if (strcmp(command, "clear") == 0) {
-            system("clear"); 
+            system("cls");
+        }
+        else if (strcmp(command, "search") == 0) {
+            char *query = strtok(NULL, "");
+            if (query == NULL) {
+                printf("Usage: search <topic>\n");
+            } else {
+                printf("Searching the web for: %s... \n", query);
+                char url[256] = "https://www.google.com/search?q=";
+                strcat(url, query);
+                                ShellExecute(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+            }
         }
         else {
             STARTUPINFO si;
