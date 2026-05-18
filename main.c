@@ -1,134 +1,294 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <windows.h> 
+#include <windows.h>
 #include <direct.h>
 #include <shellapi.h>
 #include <conio.h>
 
+
+#define MAX_INPUT 100
 #define MAX_HISTORY 10
 
-int main() {
-    char input[100];
+char history[MAX_HISTORY][MAX_INPUT];
+int history_count = 0;
+
+
+void print_prompt() {
     char cwd[MAX_PATH];
+
+    if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
+        printf("[%s]\nceashell> ", cwd);
+    }
+
+    fflush(stdout);
+}
+
+void add_to_history(const char *input) {
+    if (strlen(input) == 0) return;
+
+    if (history_count > 0 &&
+        strcmp(history[history_count - 1], input) == 0) {
+        return;
+    }
+
+    if (history_count < MAX_HISTORY) {
+        strcpy(history[history_count++], input);
+    } else {
+        for (int i = 0; i < MAX_HISTORY - 1; i++) {
+            strcpy(history[i], history[i + 1]);
+        }
+
+        strcpy(history[MAX_HISTORY - 1], input);
+    }
+}
+
+
+void read_input(char input[]) {
+    int pos = 0;
+    int history_index = history_count;
+
+    memset(input, 0, MAX_INPUT);
+
+    while (1) {
+        int ch = _getch();
+
+        if (ch == 13) {
+            input[pos] = '\0';
+            printf("\n");
+            return;
+        }
+
+        else if (ch == 8 && pos > 0) {
+            pos--;
+            printf("\b \b");
+        }
+
+        else if (ch == 0 || ch == 224) {
+            int arrow = _getch();
+
+            if (arrow == 72 && history_index > 0) {
+                history_index--;
+
+                while (pos > 0) {
+                    printf("\b \b");
+                    pos--;
+                }
+
+                strcpy(input, history[history_index]);
+
+                pos = strlen(input);
+                printf("%s", input);
+            }
+
+            else if (arrow == 80) {
+                while (pos > 0) {
+                    printf("\b \b");
+                    pos--;
+                }
+
+                if (history_index < history_count - 1) {
+                    history_index++;
+
+                    strcpy(input, history[history_index]);
+
+                    pos = strlen(input);
+                    printf("%s", input);
+                } else {
+                    history_index = history_count;
+                    input[0] = '\0';
+                }
+            }
+        }
+
+        else if (ch >= 32 && ch <= 126 && pos < MAX_INPUT - 1) {
+            input[pos++] = (char)ch;
+            printf("%c", ch);
+        }
+    }
+}
+
+
+void command_pwd() {
+    char cwd[MAX_PATH];
+
+    if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
+        printf("%s\n", cwd);
+    }
+}
+
+void command_cd(char *arg) {
+    if (!arg) {
+        printf("Usage: cd <path>\n");
+        return;
+    }
+
+    if (!SetCurrentDirectoryA(arg)) {
+        printf("Path not found: %s\n", arg);
+    }
+}
+
+void command_touch(char *arg) {
+    if (!arg) {
+        printf("Usage: touch <file>\n");
+        return;
+    }
+
+    FILE *file = fopen(arg, "a");
+
+    if (file) {
+        fclose(file);
+    }
+}
+
+void command_cat(char *arg) {
+    if (!arg) {
+        printf("Usage: cat <file>\n");
+        return;
+    }
+
+    char cmd[128];
+    sprintf(cmd, "type %s", arg);
+
+    system(cmd);
+}
+
+void command_search(char *arg) {
+    if (!arg) {
+        printf("Usage: search <query>\n");
+        return;
+    }
+
+    char url[256] = "https://www.google.com/search?q=";
+
+    strcat(url, arg);
+
+    ShellExecuteA(
+        NULL,
+        "open",
+        url,
+        NULL,
+        NULL,
+        SW_SHOWNORMAL
+    );
+}
+
+
+void execute_program(char input[]) {
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+
+    ZeroMemory(&pi, sizeof(pi));
+
+    if (CreateProcess(
+            NULL,
+            input,
+            NULL,
+            NULL,
+            FALSE,
+            0,
+            NULL,
+            NULL,
+            &si,
+            &pi)) {
+
+        WaitForSingleObject(pi.hProcess, INFINITE);
+
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    } else {
+        printf(
+            "CeaShell: '%s' is not recognized.\n",
+            input
+        );
+    }
+}
+
+
+bool handle_command(char input[]) {
+
+    char copy[MAX_INPUT];
+
+    strcpy(copy, input);
+
+    char *command = strtok(copy, " ");
+    char *arg = strtok(NULL, "");
+
+    if (!command) {
+        return true;
+    }
+
+
+    if (strcmp(command, "exit") == 0) {
+        return false;
+    }
+
+    if (strcmp(command, "clear") == 0 ||
+        strcmp(command, "cls") == 0) {
+
+        system("cls");
+    }
+
+    else if (strcmp(command, "pwd") == 0) {
+        command_pwd();
+    }
+
+
+    else if (strcmp(command, "cd") == 0) {
+        command_cd(arg);
+    }
+
+
+    else if (strcmp(command, "ls") == 0) {
+        system("dir /w");
+    }
+
+    else if (strcmp(command, "touch") == 0) {
+        command_touch(arg);
+    }
+
+    else if (strcmp(command, "cat") == 0) {
+        command_cat(arg);
+    }
+
+    else if (strcmp(command, "search") == 0) {
+        command_search(arg);
+    }
+
+    else if (strcmp(command, "echo") == 0) {
+        printf("%s\n", arg ? arg : "");
+    }
+
+    else {
+        execute_program(input);
+    }
+
+    return true;
+}
+
+
+int main() {
+
+    char input[MAX_INPUT];
+
     bool running = true;
 
-    char history[MAX_HISTORY][100];
-    int history_count = 0;
-    int history_index = -1;
+    printf("CeaShell\n");
 
-    printf("CeaShell\n\n");
+    while (running) {
 
-    do {
-        if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
-            printf("[%s]\nceashell> ", cwd);
-        } else {
-            printf("ceashell> ");
-        }
-        fflush(stdout);
+        print_prompt();
 
-        int pos = 0;
-        int current_view_idx = history_count; 
-        memset(input, 0, sizeof(input));
+        read_input(input);
 
-        while (1) {
-            int ch = _getch();
+        add_to_history(input);
 
-            if (ch == 13) {
-                input[pos] = '\0';
-                printf("\n");
-                break;
-            } 
-            else if (ch == 8) {
-                if (pos > 0) {
-                    pos--;
-                    printf("\b \b");
-                }
-            } 
-            else if (ch == 0 || ch == 224) {
-                int arrow = _getch();
-                if (arrow == 72) {
-                    if (history_count > 0 && current_view_idx > 0) {
-                        current_view_idx--;
-                        for (int i = 0; i < pos; i++) printf("\b \b");
-                        strcpy(input, history[current_view_idx]);
-                        pos = strlen(input);
-                        printf("%s", input);
-                    }
-                } 
-                else if (arrow == 80) {
-                    if (current_view_idx < history_count - 1) {
-                        current_view_idx++;
-                        for (int i = 0; i < pos; i++) printf("\b \b");
-                        strcpy(input, history[current_view_idx]);
-                        pos = strlen(input);
-                        printf("%s", input);
-                    } else {
-                        current_view_idx = history_count;
-                        for (int i = 0; i < pos; i++) printf("\b \b");
-                        pos = 0;
-                        input[0] = '\0';
-                    }
-                }
-            } 
-            else if (pos < 99 && ch >= 32 && ch <= 126) {
-                input[pos++] = (char)ch;
-                printf("%c", ch);
-            }
-        }
-
-        if (strlen(input) == 0) continue;
-
-        if (history_count == 0 || strcmp(history[history_count - 1], input) != 0) {
-            if (history_count < MAX_HISTORY) {
-                strcpy(history[history_count++], input);
-            } else {
-                for (int i = 0; i < MAX_HISTORY - 1; i++) strcpy(history[i], history[i + 1]);
-                strcpy(history[MAX_HISTORY - 1], input);
-            }
-        }
-        char input_copy[100];
-        strcpy(input_copy, input);
-        char *command = strtok(input_copy, " ");
-
-        if (strcmp(command, "exit") == 0) {
-            running = false;
-        } 
-        else if (strcmp(command, "help") == 0) {
-            printf("Built-ins: exit, cd, clear, search\nArrows: Up/Down for history\n");
-        }
-        else if (strcmp(command, "cd") == 0) {
-            char *path = strtok(NULL, "");
-            if (path && !SetCurrentDirectoryA(path)) printf("Path not found.\n");
-        }
-        else if (strcmp(command, "clear") == 0) {
-            system("cls");
-        }
-        else if (strcmp(command, "search") == 0) {
-            char *query = strtok(NULL, "");
-            if (query) {
-                char url[256] = "https://www.google.com/search?q=";
-                strcat(url, query);
-                ShellExecute(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
-            }
-        }
-        else {
-            STARTUPINFO si;
-            PROCESS_INFORMATION pi;
-            ZeroMemory(&si, sizeof(si));
-            si.cb = sizeof(si);
-            ZeroMemory(&pi, sizeof(pi));
-
-            if (CreateProcess(NULL, input, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-                WaitForSingleObject(pi.hProcess, INFINITE);
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-            } else {
-                printf("CeaShell: Command '%s' failed, car T'es stupide.\n", command);
-            }
-        }
-
-    } while (running);
+        running = handle_command(input);
+    }
 
     return 0;
 }
