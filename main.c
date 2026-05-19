@@ -210,8 +210,15 @@ bool handle_command(char input[]) {
     }
     else {
         printf("CeaShell: '%s' is not recognized.\n", command);
-    }
+        printf("Would you like to request this command on GitHub? (y/n): ");
+        
+        int choice = _getch();
+        printf("%c\n", choice);
 
+        if (choice == 'y' || choice == 'Y') {
+            ShellExecuteA(NULL, "open", "https://github.com/mazerissa/CeaShell/issues/new",NULL, NULL, SW_SHOWNORMAL);
+            }
+          }
     return true;
 }
 
