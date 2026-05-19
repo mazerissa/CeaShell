@@ -7,19 +7,19 @@
 #include <shellapi.h>
 #include <conio.h>
 
-
 #define MAX_INPUT 100
 #define MAX_HISTORY 10
 
 char history[MAX_HISTORY][MAX_INPUT];
 int history_count = 0;
-
+    
 
 void print_prompt() {
     char cwd[MAX_PATH];
 
     if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
-        printf("[%s]\nceashell> ", cwd);
+
+        printf("%s\nceashell> ", cwd);
     }
 
     fflush(stdout);
@@ -39,11 +39,9 @@ void add_to_history(const char *input) {
         for (int i = 0; i < MAX_HISTORY - 1; i++) {
             strcpy(history[i], history[i + 1]);
         }
-
         strcpy(history[MAX_HISTORY - 1], input);
     }
 }
-
 
 void read_input(char input[]) {
     int pos = 0;
@@ -77,7 +75,6 @@ void read_input(char input[]) {
                 }
 
                 strcpy(input, history[history_index]);
-
                 pos = strlen(input);
                 printf("%s", input);
             }
@@ -90,14 +87,13 @@ void read_input(char input[]) {
 
                 if (history_index < history_count - 1) {
                     history_index++;
-
                     strcpy(input, history[history_index]);
-
                     pos = strlen(input);
                     printf("%s", input);
                 } else {
                     history_index = history_count;
                     input[0] = '\0';
+                    pos = 0;
                 }
             }
         }
@@ -109,10 +105,8 @@ void read_input(char input[]) {
     }
 }
 
-
 void command_pwd() {
     char cwd[MAX_PATH];
-
     if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
         printf("%s\n", cwd);
     }
@@ -123,20 +117,17 @@ void command_cd(char *arg) {
         printf("Usage: cd <path>\n");
         return;
     }
-
     if (!SetCurrentDirectoryA(arg)) {
         printf("Path not found: %s\n", arg);
     }
 }
 
 void command_touch(char *arg) {
-    if (!arg) {
+    if (!arg) { 
         printf("Usage: touch <file>\n");
         return;
     }
-
     FILE *file = fopen(arg, "a");
-
     if (file) {
         fclose(file);
     }
@@ -147,10 +138,8 @@ void command_cat(char *arg) {
         printf("Usage: cat <file>\n");
         return;
     }
-
     char cmd[128];
     sprintf(cmd, "type %s", arg);
-
     system(cmd);
 }
 
@@ -159,60 +148,27 @@ void command_search(char *arg) {
         printf("Usage: search <query>\n");
         return;
     }
-
     char url[256] = "https://www.google.com/search?q=";
-
     strcat(url, arg);
-
-    ShellExecuteA(
-        NULL,
-        "open",
-        url,
-        NULL,
-        NULL,
-        SW_SHOWNORMAL
-    );
+    ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 }
 
-
-void execute_program(char input[]) {
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-
-    ZeroMemory(&pi, sizeof(pi));
-
-    if (CreateProcess(
-            NULL,
-            input,
-            NULL,
-            NULL,
-            FALSE,
-            0,
-            NULL,
-            NULL,
-            &si,
-            &pi)) {
-
-        WaitForSingleObject(pi.hProcess, INFINITE);
-
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-    } else {
-        printf(
-            "CeaShell: '%s' is not recognized.\n",
-            input
-        );
-    }
+void command_help() {
+    printf("  help             Display this terminal menu\n");
+    printf("  clear / cls      Flush screen buffer memory\n");
+    printf("  pwd              Print current working directory path\n");
+    printf("  cd <dir>         Change system directory node\n");
+    printf("  ls               List directory objects in wide format\n");
+    printf("  touch <file>     Instantiate or update target file metadata\n");
+    printf("  cat <file>       Output file stream buffer content directly\n");
+    printf("  search <query>   Fork query to default local web browser process\n");
+    printf("  echo <string>    Print matching text array\n");
+    printf("  exit             Terminate shell instance loop\n");
 }
 
 
 bool handle_command(char input[]) {
-
     char copy[MAX_INPUT];
-
     strcpy(copy, input);
 
     char *command = strtok(copy, " ");
@@ -222,71 +178,54 @@ bool handle_command(char input[]) {
         return true;
     }
 
-
     if (strcmp(command, "exit") == 0) {
         return false;
     }
-
-    if (strcmp(command, "clear") == 0 ||
-        strcmp(command, "cls") == 0) {
-
+    else if (strcmp(command, "clear") == 0 || strcmp(command, "cls") == 0) {
         system("cls");
     }
-
+    else if (strcmp(command, "help") == 0) {
+        command_help();
+    }
     else if (strcmp(command, "pwd") == 0) {
         command_pwd();
     }
-
-
     else if (strcmp(command, "cd") == 0) {
         command_cd(arg);
     }
-
-
     else if (strcmp(command, "ls") == 0) {
         system("dir /w");
     }
-
     else if (strcmp(command, "touch") == 0) {
         command_touch(arg);
     }
-
     else if (strcmp(command, "cat") == 0) {
         command_cat(arg);
     }
-
     else if (strcmp(command, "search") == 0) {
         command_search(arg);
     }
-
     else if (strcmp(command, "echo") == 0) {
         printf("%s\n", arg ? arg : "");
     }
-
     else {
-        execute_program(input);
+        printf("CeaShell: '%s' is not recognized.\n", command);
     }
 
     return true;
 }
 
-
 int main() {
-
     char input[MAX_INPUT];
-
     bool running = true;
 
-    printf("CeaShell\n");
+    system("cls");
+    printf("Ceashell\n");
 
     while (running) {
-
         print_prompt();
-
         read_input(input);
-
         add_to_history(input);
-
         running = handle_command(input);
     }
 
