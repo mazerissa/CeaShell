@@ -197,8 +197,9 @@ void open_url(const char *url) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "open \"%s\"", url);
     system(cmd);
-#else
+#else // Linux / WSL
     char cmd[512];
+    // Wrapping the command string tightly inside escaped quotes
     snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" > /dev/null 2>&1", url);
     system(cmd);
 #endif
