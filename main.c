@@ -2,34 +2,56 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <windows.h>
-#include <direct.h>
-#include <shellapi.h>
-#include <conio.h>
-
 #define MAX_INPUT 100
 #define MAX_HISTORY 10
 
 char history[MAX_HISTORY][MAX_INPUT];
 int history_count = 0;
-    
+
+#ifdef _WIN32
+    #include <windows.h>
+    #include <direct.h>
+    #include <shellapi.h>
+    #include <conio.h>
+    #define CLEAR_SCREEN "cls"
+    #define LIST_DIR "dir /w"
+#else
+    #include <unistd.h>
+    #include <termios.h>
+    #include <sys/stat.h>
+    #define CLEAR_SCREEN "clear"
+    #define LIST_DIR "ls"
+    #define MAX_PATH 4096
+
+    int _getch(void) {
+        struct termios oldattr, newattr;
+        int ch;
+        tcgetattr(STDIN_FILENO, &oldattr);
+        newattr = oldattr;
+        newattr.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+        ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+        return ch;
+    }
+#endif
 
 void print_prompt() {
     char cwd[MAX_PATH];
-
+#ifdef _WIN32
     if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
-
+#else
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+#endif
         printf("%s\nceashell> ", cwd);
     }
-
     fflush(stdout);
 }
 
 void add_to_history(const char *input) {
     if (strlen(input) == 0) return;
 
-    if (history_count > 0 &&
-        strcmp(history[history_count - 1], input) == 0) {
+    if (history_count > 0 && strcmp(history[history_count - 1], input) == 0) {
         return;
     }
 
@@ -52,52 +74,64 @@ void read_input(char input[]) {
     while (1) {
         int ch = _getch();
 
-        if (ch == 13) {
+        if (ch == 13 || ch == 10) {
             input[pos] = '\0';
             printf("\n");
             return;
         }
 
-        else if (ch == 8 && pos > 0) {
+        else if ((ch == 8 || ch == 127) && pos > 0) {
             pos--;
             printf("\b \b");
         }
 
+#ifdef _WIN32
         else if (ch == 0 || ch == 224) {
             int arrow = _getch();
+            // Up Arrow = 72, Down Arrow = 80
+#else
+        else if (ch == 27) {
+            if (_getch() == 91) {
+                int arrow = _getch();
 
-            if (arrow == 72 && history_index > 0) {
-                history_index--;
+                if (arrow == 65) arrow = 72;
+                else if (arrow == 66) arrow = 80;
+                else continue;
+#endif
+                if (arrow == 72 && history_index > 0) {
+                    history_index--;
 
-                while (pos > 0) {
-                    printf("\b \b");
-                    pos--;
-                }
+                    while (pos > 0) {
+                        printf("\b \b");
+                        pos--;
+                    }
 
-                strcpy(input, history[history_index]);
-                pos = strlen(input);
-                printf("%s", input);
-            }
-
-            else if (arrow == 80) {
-                while (pos > 0) {
-                    printf("\b \b");
-                    pos--;
-                }
-
-                if (history_index < history_count - 1) {
-                    history_index++;
                     strcpy(input, history[history_index]);
                     pos = strlen(input);
                     printf("%s", input);
-                } else {
-                    history_index = history_count;
-                    input[0] = '\0';
-                    pos = 0;
                 }
-            }
-        }
 
+                else if (arrow == 80) {
+                    while (pos > 0) {
+                        printf("\b \b");
+                        pos--;
+                    }
+
+                    if (history_index < history_count - 1) {
+                        history_index++;
+                        strcpy(input, history[history_index]);
+                        pos = strlen(input);
+                        printf("%s", input);
+                    } else {
+                        history_index = history_count;
+                        input[0] = '\0';
+                        pos = 0;
+                    }
+                }
+#ifndef _WIN32
+            }
+#endif
+        }
         else if (ch >= 32 && ch <= 126 && pos < MAX_INPUT - 1) {
             input[pos++] = (char)ch;
             printf("%c", ch);
@@ -105,9 +139,14 @@ void read_input(char input[]) {
     }
 }
 
+
 void command_pwd() {
     char cwd[MAX_PATH];
+#ifdef _WIN32
     if (GetCurrentDirectoryA(MAX_PATH, cwd)) {
+#else
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+#endif
         printf("%s\n", cwd);
     }
 }
@@ -117,7 +156,11 @@ void command_cd(char *arg) {
         printf("Usage: cd <path>\n");
         return;
     }
+#ifdef _WIN32
     if (!SetCurrentDirectoryA(arg)) {
+#else
+    if (chdir(arg) != 0) {
+#endif
         printf("Path not found: %s\n", arg);
     }
 }
@@ -138,9 +181,27 @@ void command_cat(char *arg) {
         printf("Usage: cat <file>\n");
         return;
     }
-    char cmd[128];
-    sprintf(cmd, "type %s", arg);
+    char cmd[256];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "type \"%s\"", arg);
+#else
+    snprintf(cmd, sizeof(cmd), "cat \"%s\"", arg);
+#endif
     system(cmd);
+}
+
+void open_url(const char *url) {
+#ifdef _WIN32
+    ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+#elif __APPLE__
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "open \"%s\"", url);
+    system(cmd);
+#else
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" > /dev/null 2>&1", url);
+    system(cmd);
+#endif
 }
 
 void command_search(char *arg) {
@@ -148,9 +209,9 @@ void command_search(char *arg) {
         printf("Usage: search <query>\n");
         return;
     }
-    char url[256] = "https://www.google.com/search?q=";
+    char url[512] = "https://www.google.com/search?q=";
     strcat(url, arg);
-    ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+    open_url(url);
 }
 
 void command_help() {
@@ -158,14 +219,13 @@ void command_help() {
     printf("  clear / cls      Flush screen buffer memory\n");
     printf("  pwd              Print current working directory path\n");
     printf("  cd <dir>         Change system directory node\n");
-    printf("  ls               List directory objects in wide format\n");
+    printf("  ls               List directory objects\n");
     printf("  touch <file>     Instantiate or update target file metadata\n");
     printf("  cat <file>       Output file stream buffer content directly\n");
     printf("  search <query>   Fork query to default local web browser process\n");
     printf("  echo <string>    Print matching text array\n");
     printf("  exit             Terminate shell instance loop\n");
 }
-
 
 bool handle_command(char input[]) {
     char copy[MAX_INPUT];
@@ -182,7 +242,7 @@ bool handle_command(char input[]) {
         return false;
     }
     else if (strcmp(command, "clear") == 0 || strcmp(command, "cls") == 0) {
-        system("cls");
+        system(CLEAR_SCREEN);
     }
     else if (strcmp(command, "help") == 0) {
         command_help();
@@ -194,7 +254,7 @@ bool handle_command(char input[]) {
         command_cd(arg);
     }
     else if (strcmp(command, "ls") == 0) {
-        system("dir /w");
+        system(LIST_DIR);
     }
     else if (strcmp(command, "touch") == 0) {
         command_touch(arg);
@@ -211,14 +271,15 @@ bool handle_command(char input[]) {
     else {
         printf("CeaShell: '%s' is not recognized.\n", command);
         printf("Would you like to request this command on GitHub? (y/n): ");
+        fflush(stdout);
         
         int choice = _getch();
         printf("%c\n", choice);
 
         if (choice == 'y' || choice == 'Y') {
-            ShellExecuteA(NULL, "open", "https://github.com/mazerissa/CeaShell/issues/new",NULL, NULL, SW_SHOWNORMAL);
-            }
-          }
+            open_url("https://github.com/mazerissa/CeaShell/issues/new");
+        }
+    }
     return true;
 }
 
@@ -226,7 +287,7 @@ int main() {
     char input[MAX_INPUT];
     bool running = true;
 
-    system("cls");
+    system(CLEAR_SCREEN);
     printf("Ceashell\n");
 
     while (running) {
