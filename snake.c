@@ -13,7 +13,7 @@
     #include <termios.h>
     #include <sys/select.h>
 
-    int _kbhit() {
+    static int _kbhit(void) {
         struct timeval tv = {0L, 0L};
         fd_set fds;
         FD_ZERO(&fds);
@@ -21,456 +21,297 @@
         return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
     }
 
-    int _getch(void) {
-        struct termios oldattr, newattr;
-        int ch;
-
-        tcgetattr(STDIN_FILENO, &oldattr);
-
-        newattr = oldattr;
-        newattr.c_lflag &= ~(ICANON | ECHO);
-
-        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
-
-        ch = getchar();
-
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
-
+    static int _getch(void) {
+        struct termios old, neo;
+        tcgetattr(STDIN_FILENO, &old);
+        neo = old;
+        neo.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &neo);
+        int ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &old);
         return ch;
     }
 #endif
 
-#define WIDTH 40
-#define HEIGHT 20
-#define MAX_TAIL 100
+#define WIDTH    40
+#define HEIGHT   20
+#define MAX_TAIL (WIDTH * HEIGHT)
 
-bool gameOver;
 
-int score;
+typedef struct { char ch; int pts; } Food;
+static const Food FOODS[] = { {'#', 10}, {'&', 20}, {'$', 30} };
+#define NUM_FOODS 3
 
-int headX, headY;
-int fruitX, fruitY;
 
-int tailX[MAX_TAIL];
-int tailY[MAX_TAIL];
+#define SPEED_START 120000   
+#define SPEED_MIN    30000  
+#define SPEED_STEP   10000 
 
-int tailLength;
 
-char foodTypes[] = {'#', '&', '$'};
-char currentFruitChar;
+static bool gameOver;
+static int  score, highScore;
+static int  headX, headY;
+static int  fruitX, fruitY;
+static int  tailX[MAX_TAIL], tailY[MAX_TAIL];
+static int  tailLen;
+static bool grid[HEIGHT][WIDTH];
+static int  foodIdx;
+static int  tickDelay;
 
-enum Directions {
-    Stop = 0,
-    Left,
-    Right,
-    Up,
-    Down
-};
+typedef enum { Stop = 0, Left, Right, Up, Down } Dir;
+static Dir dir, curDir;
+static void clearScreen(void);
+static void showControls(void);
+static void showMenu(void);
+static void spawnFood(void);
+static void setup(void);
+static void draw(void);
+static void handleInput(void);
+static void tick(void);
 
-enum Directions dir;
-enum Directions current_dir;
-
-void game_controls();
-void game_menu();
-void setup();
-void draw();
-void input();
-void logic();
-void spawnFruit();
-
-void game_controls() {
+static void clearScreen(void) {
 #ifdef _WIN32
     system("cls");
 #else
-    system("clear");
+    fputs("\033[2J\033[H", stdout);
+    fflush(stdout);
 #endif
+}
 
-    printf("=================================\n");
-    printf("         GAME CONTROLS           \n");
-    printf("=================================\n\n");
-
-    printf("  W / UP-ARROW    -> Move Up\n");
-    printf("  S / DOWN-ARROW  -> Move Down\n");
-    printf("  A / LEFT-ARROW  -> Move Left\n");
-    printf("  D / RIGHT-ARROW -> Move Right\n");
-    printf("  X / ESC         -> Exit Game\n\n");
-
-    printf("Press any key to go back to main menu...");
-
+static void showControls(void) {
+    clearScreen();
+    puts("=================================");
+    puts("         GAME CONTROLS           ");
+    puts("=================================\n");
+    puts("  W / UP-ARROW    -> Move Up");
+    puts("  S / DOWN-ARROW  -> Move Down");
+    puts("  A / LEFT-ARROW  -> Move Left");
+    puts("  D / RIGHT-ARROW -> Move Right");
+    puts("  X / ESC         -> Quit\n");
+    puts("  Food & points:");
+    puts("    #  =  10 pts  (common)");
+    puts("    &  =  20 pts  (rare)");
+    puts("    $  =  30 pts  (jackpot)\n");
+    puts("  Speed increases each time you eat!\n");
+    puts("Press any key to return...");
     _getch();
 }
 
-void game_menu() {
-    while (1) {
+static void showMenu(void) {
+    for (;;) {
+        clearScreen();
+        puts(" _________________________________________________________________");
+        puts(" |  ________  ________   ________  ___  __    _______            |");
+        puts(" | |\\   ____\\|\\   ___  \\|\\   __  \\|\\  \\|\\  \\ |\\  ___ \\           |");
+        puts(" | \\ \\  \\___|\\ \\  \\\\ \\  \\ \\  \\|\\  \\ \\  \\/  /|\\ \\   __/|          |");
+        puts(" |  \\ \\  \\    \\ \\  \\\\ \\  \\ \\   __  \\ \\   ___  \\ \\  \\_|/__        |");
+        puts(" |   \\ \\  \\____\\ \\  \\\\ \\  \\ \\  \\ \\  \\ \\  \\\\ \\  \\ \\  \\_|\\ \\       |");
+        puts(" |    \\ \\_______\\ \\__\\\\ \\__\\ \\__\\ \\__\\ \\__\\\\ \\__\\ \\_______\\      |");
+        puts(" |     \\|_______|\\|__| \\|__|\\|__|\\|__|\\|__| \\|__|\\|_______|      |");
+        puts(" |_______________________________________________________________|");
 
-#ifdef _WIN32
-        system("cls");
-#else
-        system("clear");
-#endif
-
-        printf(" _________________________________________________________________\n");
-        printf(" |  ________  ________   ________  ___  __    _______            |\n");
-        printf(" | |\\   ____\\|\\   ___  \\|\\   __  \\|\\  \\|\\  \\ |\\  ___ \\           |\n");
-        printf(" | \\ \\  \\___|\\ \\  \\\\ \\  \\ \\  \\|\\  \\ \\  \\/  /|\\ \\   __/|          |\n");
-        printf(" |  \\ \\  \\    \\ \\  \\\\ \\  \\ \\   __  \\ \\   ___  \\ \\  \\_|/__        |\n");
-        printf(" |   \\ \\  \\____\\ \\  \\\\ \\  \\ \\  \\ \\  \\ \\  \\\\ \\  \\ \\  \\_|\\ \\       |\n");
-        printf(" |    \\ \\_______\\ \\__\\\\ \\__\\ \\__\\ \\__\\ \\__\\\\ \\__\\ \\_______\\      |\n");
-        printf(" |     \\|_______|\\|__| \\|__|\\|__|\\|__|\\|__| \\|__|\\|_______|      |\n");
-        printf(" |_______________________________________________________________|\n");
-
-        printf("\n             [P] Play Game   [H] Help   [E] Exit\n\n");
-        printf(" Choose an option: ");
-
+        if (highScore > 0) printf("\n             High Score: %d\n", highScore);
+        puts("\n             [P] Play   [H] Help   [E] Exit\n");
+        fputs(" Choose: ", stdout);
         fflush(stdout);
 
-        int choice = _getch();
-        choice = tolower(choice);
-
-        if (choice == 'p') {
-            break;
-        }
-        else if (choice == 'h') {
-            game_controls();
-        }
-        else if (choice == 'e' || choice == 27) {
-            exit(0);
-        }
+        int ch = tolower(_getch());
+        if      (ch == 'p')            break;
+        else if (ch == 'h')            showControls();
+        else if (ch == 'e' || ch == 27) exit(0);
     }
 }
 
-void spawnFruit() {
-    bool valid;
-
+static void spawnFood(void) {
+    int x, y;
     do {
-        valid = true;
-
-        fruitX = (rand() % (WIDTH - 2)) + 1;
-        fruitY = (rand() % (HEIGHT - 2)) + 1;
-
-        if (fruitX == headX && fruitY == headY) {
-            valid = false;
-        }
-
-        for (int i = 0; i < tailLength; i++) {
-            if (tailX[i] == fruitX && tailY[i] == fruitY) {
-                valid = false;
-                break;
-            }
-        }
-
-    } while (!valid);
-
-    currentFruitChar = foodTypes[rand() % 3];
+        x = (rand() % (WIDTH  - 2)) + 1;
+        y = (rand() % (HEIGHT - 2)) + 1;
+    } while ((x == headX && y == headY) || grid[y][x]);
+    fruitX  = x;
+    fruitY  = y;
+    foodIdx = rand() % NUM_FOODS;
 }
 
-void setup() {
+static void setup(void) {
     srand((unsigned int)time(NULL));
-
-    gameOver = false;
-
-    dir = Stop;
-    current_dir = Stop;
-
-    headX = WIDTH / 2;
-    headY = HEIGHT / 2;
-
-    score = 0;
-
-    tailLength = 0;
-
-    spawnFruit();
+    gameOver  = false;
+    dir       = Stop;
+    curDir    = Stop;
+    headX     = WIDTH  / 2;
+    headY     = HEIGHT / 2;
+    score     = 0;
+    tailLen   = 0;
+    tickDelay = SPEED_START;
+    memset(grid, 0, sizeof(grid));
+    spawnFood();
 }
 
-void draw() {
-
-#ifdef _WIN32
-    COORD cursorPosition;
-
-    cursorPosition.X = 0;
-    cursorPosition.Y = 0;
-
-    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPosition);
-#else
-    printf("\033[H\033[J");
-#endif
-
-    char frameBuffer[(HEIGHT * (WIDTH + 1)) + 100];
-
+static void draw(void) {
+    static char buf[HEIGHT * (WIDTH + 1) + 128];
     int ptr = 0;
 
     for (int y = 0; y < HEIGHT; y++) {
-
         for (int x = 0; x < WIDTH; x++) {
-
-            if (y == 0 || y == HEIGHT - 1 || x == 0 || x == WIDTH - 1) {
-                frameBuffer[ptr++] = '#';
-            }
-
-            else if (x == headX && y == headY) {
-                frameBuffer[ptr++] = '@';
-            }
-
-            else if (x == fruitX && y == fruitY) {
-                frameBuffer[ptr++] = currentFruitChar;
-            }
-
-            else {
-
-                bool isTail = false;
-
-                for (int i = 0; i < tailLength; i++) {
-
-                    if (tailX[i] == x && tailY[i] == y) {
-                        frameBuffer[ptr++] = 'o';
-                        isTail = true;
-                        break;
-                    }
-                }
-
-                if (!isTail) {
-                    frameBuffer[ptr++] = ' ';
-                }
-            }
+            char c;
+            if (y == 0 || y == HEIGHT-1 || x == 0 || x == WIDTH-1)
+                c = '#';
+            else if (x == headX && y == headY)
+                c = '@';
+            else if (x == fruitX && y == fruitY)
+                c = FOODS[foodIdx].ch;
+            else if (grid[y][x])
+                c = 'o';
+            else
+                c = ' ';
+            buf[ptr++] = c;
         }
-
-        frameBuffer[ptr++] = '\n';
+        buf[ptr++] = '\n';
     }
+    buf[ptr] = '\0';
+#ifdef _WIN32
+    COORD origin = {0, 0};
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), origin);
+#else
+    fputs("\033[H", stdout);
+#endif
 
-    frameBuffer[ptr] = '\0';
+    fputs(buf, stdout);
 
-    printf("%s", frameBuffer);
-
-    printf("\nScore: %d\n", score);
-
+    int level = (SPEED_START - tickDelay) / SPEED_STEP + 1;
+    printf("Score: %-6d  Best: %-6d  Level: %d\n", score, highScore, level);
     fflush(stdout);
 }
 
-void input() {
-
+static void handleInput(void) {
 #ifdef _WIN32
-
-    if (GetAsyncKeyState('W') & 0x8000 || GetAsyncKeyState(VK_UP) & 0x8000) {
-
-        if (current_dir != Down)
-            dir = Up;
-    }
-
-    else if (GetAsyncKeyState('S') & 0x8000 || GetAsyncKeyState(VK_DOWN) & 0x8000) {
-
-        if (current_dir != Up)
-            dir = Down;
-    }
-
-    else if (GetAsyncKeyState('A') & 0x8000 || GetAsyncKeyState(VK_LEFT) & 0x8000) {
-
-        if (current_dir != Right)
-            dir = Left;
-    }
-
-    else if (GetAsyncKeyState('D') & 0x8000 || GetAsyncKeyState(VK_RIGHT) & 0x8000) {
-
-        if (current_dir != Left)
-            dir = Right;
-    }
-
-    else if (GetAsyncKeyState('X') & 0x8000 || GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
-
-        gameOver = true;
-    }
-
+    if      (GetAsyncKeyState('W') & 0x8000 || GetAsyncKeyState(VK_UP)     & 0x8000) { if (curDir != Down)  dir = Up;    }
+    else if (GetAsyncKeyState('S') & 0x8000 || GetAsyncKeyState(VK_DOWN)   & 0x8000) { if (curDir != Up)    dir = Down;  }
+    else if (GetAsyncKeyState('A') & 0x8000 || GetAsyncKeyState(VK_LEFT)   & 0x8000) { if (curDir != Right) dir = Left;  }
+    else if (GetAsyncKeyState('D') & 0x8000 || GetAsyncKeyState(VK_RIGHT)  & 0x8000) { if (curDir != Left)  dir = Right; }
+    else if (GetAsyncKeyState('X') & 0x8000 || GetAsyncKeyState(VK_ESCAPE) & 0x8000) { gameOver = true; }
 #else
-
     while (_kbhit()) {
-
-        int key = _getch();
-
-        if (key == 27) {
-
+        int k = _getch();
+        if (k == 27) {
             if (_kbhit()) {
-
-                int bracket = _getch();
-
-                if (bracket == 91 && _kbhit()) {
-
-                    int arrow = _getch();
-
-                    if (arrow == 65 && current_dir != Down)
-                        dir = Up;
-
-                    else if (arrow == 66 && current_dir != Up)
-                        dir = Down;
-
-                    else if (arrow == 68 && current_dir != Right)
-                        dir = Left;
-
-                    else if (arrow == 67 && current_dir != Left)
-                        dir = Right;
+                if (_getch() == 91 && _kbhit()) {
+                    int a = _getch();
+                    if      (a == 65 && curDir != Down)  dir = Up;
+                    else if (a == 66 && curDir != Up)    dir = Down;
+                    else if (a == 68 && curDir != Right) dir = Left;
+                    else if (a == 67 && curDir != Left)  dir = Right;
                 }
-            }
-            else {
+            } else {
                 gameOver = true;
             }
-        }
-
-        else {
-
-            key = tolower(key);
-
-            if (key == 'w' && current_dir != Down)
-                dir = Up;
-
-            else if (key == 's' && current_dir != Up)
-                dir = Down;
-
-            else if (key == 'a' && current_dir != Right)
-                dir = Left;
-
-            else if (key == 'd' && current_dir != Left)
-                dir = Right;
-
-            else if (key == 'x')
-                gameOver = true;
+        } else {
+            k = tolower(k);
+            if      (k == 'w' && curDir != Down)  dir = Up;
+            else if (k == 's' && curDir != Up)    dir = Down;
+            else if (k == 'a' && curDir != Right) dir = Left;
+            else if (k == 'd' && curDir != Left)  dir = Right;
+            else if (k == 'x')                    gameOver = true;
         }
     }
-
 #endif
 }
 
-void logic() {
+static void tick(void) {
+    if (dir != Stop) curDir = dir;
+    if (curDir == Stop) return;
 
-    if (dir != Stop)
-        current_dir = dir;
+    int nx = headX, ny = headY;
+    switch (curDir) {
+        case Left:  nx--; break;
+        case Right: nx++; break;
+        case Up:    ny--; break;
+        case Down:  ny++; break;
+        default:          break;
+    }
 
-    int prevX = tailX[0];
-    int prevY = tailY[0];
-
-    int prev2X, prev2Y;
-
+    bool ate = (nx == fruitX && ny == fruitY);
+    if (!ate && tailLen > 0)
+        grid[tailY[tailLen - 1]][tailX[tailLen - 1]] = false;
+    if (nx <= 0 || nx >= WIDTH-1 || ny <= 0 || ny >= HEIGHT-1) {
+        gameOver = true;
+        return;
+    }
+    if (grid[ny][nx]) {
+        gameOver = true;
+        return;
+    }
+    memmove(&tailX[1], &tailX[0], (size_t)tailLen * sizeof(int));
+    memmove(&tailY[1], &tailY[0], (size_t)tailLen * sizeof(int));
     tailX[0] = headX;
     tailY[0] = headY;
 
-    for (int i = 1; i < tailLength; i++) {
+    if (tailLen > 0 || ate)
+        grid[headY][headX] = true;
 
-        prev2X = tailX[i];
-        prev2Y = tailY[i];
+    headX = nx;
+    headY = ny;
 
-        tailX[i] = prevX;
-        tailY[i] = prevY;
-
-        prevX = prev2X;
-        prevY = prev2Y;
-    }
-
-    switch (dir) {
-
-        case Left:
-            headX--;
-            break;
-
-        case Right:
-            headX++;
-            break;
-
-        case Up:
-            headY--;
-            break;
-
-        case Down:
-            headY++;
-            break;
-
-        default:
-            break;
-    }
-
-    if (headX <= 0 || headX >= WIDTH - 1 ||
-        headY <= 0 || headY >= HEIGHT - 1) {
-
-        gameOver = true;
-    }
-
-    for (int i = 1; i < tailLength; i++) {
-
-        if (tailX[i] == headX && tailY[i] == headY) {
-            gameOver = true;
-        }
-    }
-
-    if (headX == fruitX && headY == fruitY) {
-
-        score += 10;
-
-        if (tailLength < MAX_TAIL)
-            tailLength++;
-
-        spawnFruit();
+    if (ate) {
+        score += FOODS[foodIdx].pts;
+        if (score > highScore) highScore = score;
+        if (tailLen < MAX_TAIL - 1) tailLen++;
+        if (tickDelay > SPEED_MIN)  tickDelay -= SPEED_STEP;
+        spawnFood();
     }
 }
 
-int main() {
 
+int main(void) {
 #ifdef _WIN32
-
-    HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-
-    CONSOLE_CURSOR_INFO info;
-
-    info.dwSize = 100;
-    info.bVisible = FALSE;
-
-    SetConsoleCursorInfo(consoleHandle, &info);
-
+    HANDLE con = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO ci = {100, FALSE};
+    SetConsoleCursorInfo(con, &ci);
 #else
-
-    printf("\e[?25l");
-
+    fputs("\e[?25l", stdout);
+    fflush(stdout);
 #endif
 
-    game_menu();
+    highScore = 0;
 
-    setup();
+    for (;;) {
+        showMenu();
+        setup();
+        clearScreen();
 
+        while (!gameOver) {
+            draw();
+            handleInput();
+            tick();
 #ifdef _WIN32
-    system("cls");
+            Sleep(tickDelay / 1000);
 #else
-    system("clear");
+            usleep(tickDelay);
 #endif
+        }
+        clearScreen();
+        puts("=================================");
+        printf("  GAME OVER!  Score : %d\n", score);
+        printf("  High Score  : %d\n", highScore);
+        puts("=================================\n");
+        puts("  [R] Play Again    [E] Exit\n");
+        fputs("  > ", stdout);
+        fflush(stdout);
 
-    while (!gameOver) {
-
-        draw();
-
-        input();
-
-        logic();
-
-#ifdef _WIN32
-        Sleep(60);
-#else
-        usleep(60000);
-#endif
+        for (;;) {
+            int ch = tolower(_getch());
+            if (ch == 'r') break;
+            if (ch == 'e' || ch == 27) goto done;
+        }
     }
 
+done:
 #ifdef _WIN32
-
+    ci.bVisible = TRUE;
+    SetConsoleCursorInfo(con, &ci);
     system("cls");
-
-    info.bVisible = TRUE;
-
-    SetConsoleCursorInfo(consoleHandle, &info);
-
 #else
-
-    system("clear");
-
-    printf("\e[?25h");
-
+    fputs("\e[?25h", stdout);
 #endif
-
-    printf("=================================\n");
-    printf("  GAME OVER! Final Score: %d\n", score);
-    printf("=================================\n\n");
-
     return 0;
 }
