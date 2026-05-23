@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+
 #define MAX_INPUT 100
 #define MAX_HISTORY 10
 
@@ -88,7 +89,6 @@ void read_input(char input[]) {
 #ifdef _WIN32
         else if (ch == 0 || ch == 224) {
             int arrow = _getch();
-            // Up Arrow = 72, Down Arrow = 80
 #else
         else if (ch == 27) {
             if (_getch() == 91) {
@@ -138,7 +138,6 @@ void read_input(char input[]) {
         }
     }
 }
-
 
 void command_pwd() {
     char cwd[MAX_PATH];
@@ -199,7 +198,6 @@ void open_url(const char *url) {
     system(cmd);
 #else // Linux / WSL
     char cmd[512];
-    // Wrapping the command string tightly inside escaped quotes
     snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" > /dev/null 2>&1", url);
     system(cmd);
 #endif
@@ -210,8 +208,19 @@ void command_search(char *arg) {
         printf("Usage: search <query>\n");
         return;
     }
+
     char url[512] = "https://www.google.com/search?q=";
-    strcat(url, arg);
+    int url_len = strlen(url);
+
+    for (int i = 0; arg[i] != '\0' && url_len < 510; i++) {
+        if (arg[i] == ' ') {
+            url[url_len++] = '+';
+        } else {
+            url[url_len++] = arg[i];
+        }
+    }
+    url[url_len] = '\0';
+
     open_url(url);
 }
 
@@ -224,6 +233,7 @@ void command_help() {
     printf("  touch <file>     Instantiate or update target file metadata\n");
     printf("  cat <file>       Output file stream buffer content directly\n");
     printf("  search <query>   Fork query to default local web browser process\n");
+    printf("  snake            Launch the built-in retro arcade engine\n");
     printf("  echo <string>    Print matching text array\n");
     printf("  exit             Terminate shell instance loop\n");
 }
@@ -268,6 +278,36 @@ bool handle_command(char input[]) {
     }
     else if (strcmp(command, "echo") == 0) {
         printf("%s\n", arg ? arg : "");
+    }
+    else if (strcmp(command, "snake") == 0) {
+#ifdef _WIN32
+        if (GetFileAttributesA("snake.exe") == INVALID_FILE_ATTRIBUTES) {
+            printf("CeaShell: 'snake.exe' not found. Automating build from 'snake.c'...\n");
+            
+            if (GetFileAttributesA("snake.c") == INVALID_FILE_ATTRIBUTES) {
+                printf("Error: 'snake.c' source file is missing! Cannot compile.\n");
+            } else {
+                system("gcc snake.c -o snake.exe");
+                printf("Build successful!\n");
+                system(".\\snake.exe");
+            }
+        } else {
+            system(".\\snake.exe");
+        }
+#else
+        if (access("snake", F_OK) != 0) {
+            printf("CeaShell: 'snake' binary not found. Automating build from 'snake.c'...\n");
+            if (access("snake.c", F_OK) != 0) {
+                printf("Error: 'snake.c' source file is missing! Cannot compile.\n");
+            } else {
+                system("gcc snake.c -o snake");
+                printf("Build successful!\n");
+                system("./snake");
+            }
+        } else {
+            system("./snake");
+        }
+#endif
     }
     else {
         printf("CeaShell: '%s' is not recognized.\n", command);
