@@ -226,6 +226,7 @@ void command_search(char *arg) {
 
 void command_help() {
     printf("  help             Display this terminal menu\n");
+    printf("  snake            Display the built-in snake game\n");
     printf("  clear / cls      Flush screen buffer memory\n");
     printf("  pwd              Print current working directory path\n");
     printf("  cd <dir>         Change system directory node\n");
